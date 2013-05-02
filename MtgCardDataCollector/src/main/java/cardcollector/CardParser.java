@@ -9,11 +9,14 @@ import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.Mongo;
+import com.mongodb.WriteResult;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.log4j.BasicConfigurator;
+import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 
 import org.jsoup.Jsoup;
@@ -27,8 +30,8 @@ import org.jsoup.select.Elements;
  */
 public class CardParser {
 
-    private final String MONGO_HOST = "ds033477.mongolab.com";
-    private final int MONGO_PORT = 33477;
+    private final String MONGO_HOST = "dbh74.mongolab.com";
+    private final int MONGO_PORT = 27747;
     private final String MONGO_DB = "mtg";
     private final String MONGO_COLLECTION = "cards";
     private DBCollection cardCollection;
@@ -57,13 +60,22 @@ public class CardParser {
 
     public CardParser(boolean saveCards) {
         BasicConfigurator.configure();
+        log.setLevel(Level.TRACE);
         init();
         this.saveCards = saveCards;
         if (this.saveCards) {
             try {
                 Mongo m = new Mongo(MONGO_HOST, MONGO_PORT);
+                
                 DB db = m.getDB(MONGO_DB);
+                String user = "mtguser";
+                String password = "mtguser";
+                boolean authenticated = db.authenticate(user, password.toCharArray());
+                if(!authenticated){
+                    throw new RuntimeException("Error authenticating!");
+                }
                 cardCollection = db.getCollection(MONGO_COLLECTION);
+                log.info("Success initializing mongo");
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -82,31 +94,44 @@ public class CardParser {
         types.add("TRIBAL");
     }
 
-    public Map<String, Object> getCardFromGatherer(int id) {
+    public Map<String, Object> getCardFromGatherer(int id) throws IOException{
         Map<String, Object> cardInfo = null;
         try {
             Document doc = Jsoup.connect(GATHERER_ROOT + id).get();
             cardInfo = parseCard(doc);
         } catch (ParseException e) {
             log.error("Error parsing card: " + e.getLocalizedMessage());
-        } catch (Exception e) {
-            log.error("Error connecting to the gatherer: " + e.getLocalizedMessage());
-        }
+        } 
 
         return cardInfo;
 
     }
 
     private void saveCard(Map<String, Object> cardInfo) {
+        
         DBObject object = new BasicDBObject(cardInfo);
+        log.trace("Saving card: "+object.toString());
+        DBObject searchObject = new BasicDBObject();
+        searchObject.put(NAME, cardInfo.get(NAME));
         try {
-            cardCollection.insert(object);
+            WriteResult result = cardCollection.update(searchObject,object, true, false);
+            log.debug("Result" +result.toString()+". Error: "+result.getError()+" Last Error: "+result.getLastError().toString());
+            
+            log.debug("Success inserting card");
         } catch (Exception e) {
             log.error("Error inserting card: "+e.getLocalizedMessage());
         }
     }
+    
+    public void processCardTest(int id) throws IOException{
+        Map<String,Object> cardTest = new HashMap<String,Object>();
+        cardTest.put(NAME, "TEST CARD");
+        cardTest.put("multiverseid", id);
+        saveCard(cardTest);
+    }
 
-    public void processCard(int id) {
+    public void processCard(int id) throws IOException{
+        
         Map<String, Object> cardInfo = getCardFromGatherer(id);
         cardInfo.put("multiverseid", id);
         if (log.isTraceEnabled()) {
@@ -119,6 +144,11 @@ public class CardParser {
             }
         } else {
             log.debug("Invalid card number: " + id);
+            try {
+                Thread.sleep(100);
+            } catch(Exception e){
+                
+            }
         }
     }
 
